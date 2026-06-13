@@ -88,8 +88,8 @@ export default function ScanPage() {
   }, []);
 
   const onResult = useCallback((code: string) => {
-    // Keep the camera running so the user can scan the next item without
-    // re-enabling it. The Scanner debounces duplicate reads of the same code.
+    // Pause the camera while the user reviews/confirms the scanned item.
+    setCameraOn(false);
     lookupCode(code);
   }, [lookupCode]);
 
@@ -112,6 +112,8 @@ export default function ScanPage() {
       );
       setLookup(null);
       setManual("");
+      // Automatically restart the camera so the next item can be scanned hands-free.
+      setCameraOn(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed.");
     } finally {
