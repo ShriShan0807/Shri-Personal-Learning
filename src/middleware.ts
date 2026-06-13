@@ -8,7 +8,7 @@ const PROTECTED: { prefix: string; roles?: Role[] }[] = [
   { prefix: "/labels", roles: ["admin"] },
   { prefix: "/scan" },
   { prefix: "/inventory" },
-  { prefix: "/reports" },
+  { prefix: "/reports", roles: ["admin", "owner", "manager"] },
   { prefix: "/", roles: undefined }, // dashboard
 ];
 
