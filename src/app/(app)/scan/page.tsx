@@ -88,7 +88,8 @@ export default function ScanPage() {
   }, []);
 
   const onResult = useCallback((code: string) => {
-    setCameraOn(false);
+    // Keep the camera running so the user can scan the next item without
+    // re-enabling it. The Scanner debounces duplicate reads of the same code.
     lookupCode(code);
   }, [lookupCode]);
 
