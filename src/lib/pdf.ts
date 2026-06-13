@@ -11,8 +11,14 @@ const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const MARGIN = 28;
 const COLS = 3;
-const ROWS = 7;
-const QR_SIZE = 96;
+const ROWS = 6;
+const QR_SIZE = 80;
+
+// Vertical layout within a cell (spacing between the stacked elements).
+const GAP_QR_NAME = 12; // QR bottom -> product-name baseline
+const GAP_NAME_CODE = 11; // name baseline -> code baseline
+const NAME_SIZE = 8;
+const CODE_SIZE = 7;
 
 /**
  * Compose a printable PDF of labels arranged in a grid. Each label contains:
@@ -28,6 +34,11 @@ export async function buildLabelPdf(labels: LabelInput[]): Promise<Buffer> {
   const cellW = usableW / COLS;
   const cellH = usableH / ROWS;
   const perPage = COLS * ROWS;
+
+  // Total height of the stacked content (QR + name + code). Used to vertically
+  // center the block inside the cell so it can never overflow into the row below.
+  const blockH = QR_SIZE + GAP_QR_NAME + NAME_SIZE + GAP_NAME_CODE + CODE_SIZE;
+  const padTop = Math.max((cellH - blockH) / 2, 6);
 
   for (let i = 0; i < labels.length; i++) {
     const label = labels[i];
@@ -51,32 +62,31 @@ export async function buildLabelPdf(labels: LabelInput[]): Promise<Buffer> {
       borderWidth: 0.5,
     });
 
-    // QR image.
+    // QR image (top of the centered block).
     const png = await qrPng(label.code, 240);
     const image = await doc.embedPng(png);
     const qrX = cellX + (cellW - QR_SIZE) / 2;
-    const qrY = cellTop - QR_SIZE - 10;
+    const qrY = cellTop - padTop - QR_SIZE;
     page.drawImage(image, { x: qrX, y: qrY, width: QR_SIZE, height: QR_SIZE });
 
     // Product name (bold), truncated to fit.
     const name = truncate(label.productName, 26);
-    const nameSize = 8;
-    const nameWidth = fontBold.widthOfTextAtSize(name, nameSize);
+    const nameWidth = fontBold.widthOfTextAtSize(name, NAME_SIZE);
+    const nameY = qrY - GAP_QR_NAME;
     page.drawText(name, {
       x: cellX + (cellW - nameWidth) / 2,
-      y: qrY - 14,
-      size: nameSize,
+      y: nameY,
+      size: NAME_SIZE,
       font: fontBold,
       color: rgb(0.1, 0.1, 0.1),
     });
 
     // Human-readable code.
-    const codeSize = 7;
-    const codeWidth = font.widthOfTextAtSize(label.code, codeSize);
+    const codeWidth = font.widthOfTextAtSize(label.code, CODE_SIZE);
     page.drawText(label.code, {
       x: cellX + (cellW - codeWidth) / 2,
-      y: qrY - 26,
-      size: codeSize,
+      y: nameY - GAP_NAME_CODE,
+      size: CODE_SIZE,
       font,
       color: rgb(0.3, 0.3, 0.3),
     });
