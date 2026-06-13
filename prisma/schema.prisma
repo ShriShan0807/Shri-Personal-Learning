@@ -1,0 +1,165 @@
+// Warehouse Inventory Management System — Prisma schema.
+//
+// Uses SQLite for zero-config local development. To deploy on Postgres/Supabase:
+//   1. Change `provider` below to "postgresql".
+//   2. Point DATABASE_URL at your Postgres/Supabase connection string.
+//   3. Run `npx prisma migrate dev`.
+// Enum-like fields are stored as String (SQLite has no native enums); allowed
+// values are documented inline and enforced in application code (Zod).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Roles: "admin" | "owner" | "manager" | "staff"
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String?
+  name         String?
+  role         String   @default("staff")
+  isActive     Boolean  @default(true)
+  warehouseId  String?
+  invitedById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  warehouse  Warehouse? @relation(fields: [warehouseId], references: [id])
+  invitedBy  User?      @relation("UserInvites", fields: [invitedById], references: [id])
+  invitees   User[]     @relation("UserInvites")
+
+  labelBatches LabelBatch[]
+  movements    Movement[]
+  auditLogs    AuditLog[]
+
+  @@index([role])
+  @@index([warehouseId])
+}
+
+model Warehouse {
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  createdAt DateTime @default(now())
+
+  users        User[]
+  products     Product[]
+  labelBatches LabelBatch[]
+  items        Item[]
+  movements    Movement[]
+}
+
+model Store {
+  id        String   @id @default(cuid())
+  name      String
+  location  String?
+  createdAt DateTime @default(now())
+
+  items     Item[]
+  movements Movement[]
+}
+
+model Product {
+  id                 String   @id @default(cuid())
+  name               String
+  description        String?
+  category           String?
+  unit               String?
+  codePrefix         String   @unique // used to build item codes: {PREFIX}-{SEQ}-{RAND}
+  seqCounter         Int      @default(0) // last sequence minted for this product
+  defaultWarehouseId String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  defaultWarehouse Warehouse?   @relation(fields: [defaultWarehouseId], references: [id])
+  labelBatches     LabelBatch[]
+  items            Item[]
+  movements        Movement[]
+
+  @@index([codePrefix])
+}
+
+// status: "PENDING" | "GENERATING" | "READY" | "FAILED"
+model LabelBatch {
+  id          String    @id @default(cuid())
+  productId   String
+  warehouseId String
+  quantity    Int
+  status      String    @default("PENDING")
+  requestedById String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  product     Product   @relation(fields: [productId], references: [id])
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  requestedBy User?     @relation(fields: [requestedById], references: [id])
+  items       Item[]
+
+  @@index([productId])
+  @@index([status])
+}
+
+// status: "GENERATED" | "IN_WAREHOUSE" | "EXITED"
+model Item {
+  id          String    @id @default(cuid())
+  code        String    @unique // QR payload / human-readable code
+  productId   String
+  batchId     String?
+  warehouseId String
+  status      String    @default("GENERATED")
+  enteredAt   DateTime?
+  exitedAt    DateTime?
+  storeId     String?
+  createdAt   DateTime  @default(now())
+
+  product   Product     @relation(fields: [productId], references: [id])
+  batch     LabelBatch? @relation(fields: [batchId], references: [id])
+  warehouse Warehouse   @relation(fields: [warehouseId], references: [id])
+  store     Store?      @relation(fields: [storeId], references: [id])
+  movements Movement[]
+
+  @@index([productId, status])
+  @@index([warehouseId, status])
+  @@index([batchId])
+}
+
+// type: "ENTRY" | "EXIT"
+model Movement {
+  id          String   @id @default(cuid())
+  itemId      String
+  productId   String
+  warehouseId String
+  type        String
+  storeId     String?
+  scannedById String?
+  scannedAt   DateTime @default(now())
+
+  item      Item       @relation(fields: [itemId], references: [id])
+  product   Product    @relation(fields: [productId], references: [id])
+  warehouse Warehouse  @relation(fields: [warehouseId], references: [id])
+  store     Store?     @relation(fields: [storeId], references: [id])
+  scannedBy User?      @relation(fields: [scannedById], references: [id])
+
+  @@index([scannedAt])
+  @@index([productId, type])
+  @@index([warehouseId, type])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entity      String
+  entityId    String?
+  metadata    String? // JSON string
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorUserId], references: [id])
+
+  @@index([createdAt])
+}
