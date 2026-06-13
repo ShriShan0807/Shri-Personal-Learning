@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
 // Scanner uses browser-only camera APIs, so load it client-side only.
@@ -30,6 +30,7 @@ interface Item {
 }
 
 type Lookup = { item: Item; nextAction: "ENTRY" | "EXIT" | null };
+type Mode = "ENTRY" | "EXIT";
 
 const STATUS_STYLE: Record<string, string> = {
   GENERATED: "bg-slate-100 text-slate-700",
@@ -38,7 +39,8 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function ScanPage() {
-  const [cameraOn, setCameraOn] = useState(false);
+  const [mode, setMode] = useState<Mode>("ENTRY");
+  const [cameraOn, setCameraOn] = useState(true);
   const [manual, setManual] = useState("");
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
@@ -46,6 +48,25 @@ export default function ScanPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const loadStores = useCallback(async () => {
+    if (stores.length > 0) return;
+    const s = await fetch("/api/stores").then((r) => r.json());
+    setStores(s.stores || []);
+  }, [stores.length]);
+
+  // Preload stores once so switching to Exit mode is instant.
+  useEffect(() => {
+    loadStores();
+  }, [loadStores]);
+
+  function changeMode(next: Mode) {
+    setMode(next);
+    setError(null);
+    setToast(null);
+    setLookup(null);
+    setManual("");
+  }
 
   const lookupCode = useCallback(async (code: string) => {
     const trimmed = code.trim();
@@ -58,20 +79,16 @@ export default function ScanPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lookup failed.");
       setLookup(data);
-      setStoreId("");
-      if (data.nextAction === "EXIT" && stores.length === 0) {
-        const s = await fetch("/api/stores").then((r) => r.json());
-        setStores(s.stores || []);
-      }
     } catch (err) {
       setLookup(null);
       setError(err instanceof Error ? err.message : "Lookup failed.");
     } finally {
       setBusy(false);
     }
-  }, [stores.length]);
+  }, []);
 
   const onResult = useCallback((code: string) => {
+    // Pause the camera while the user reviews/confirms the scanned item.
     setCameraOn(false);
     lookupCode(code);
   }, [lookupCode]);
@@ -84,7 +101,7 @@ export default function ScanPage() {
       const res = await fetch(`/api/items/${encodeURIComponent(lookup.item.code)}/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(lookup.nextAction === "EXIT" ? { storeId } : {}),
+        body: JSON.stringify(mode === "EXIT" ? { mode, storeId } : { mode }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Scan failed.");
@@ -95,6 +112,8 @@ export default function ScanPage() {
       );
       setLookup(null);
       setManual("");
+      // Automatically restart the camera so the next item can be scanned hands-free.
+      setCameraOn(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Scan failed.");
     } finally {
@@ -103,19 +122,69 @@ export default function ScanPage() {
   }
 
   const item = lookup?.item;
-  const next = lookup?.nextAction;
+  // Whether the selected mode is valid for this item's current status.
+  const canEnter = item?.status === "GENERATED";
+  const canExit = item?.status === "IN_WAREHOUSE";
+  const modeAllowed = mode === "ENTRY" ? canEnter : canExit;
+
+  function blockedReason(): string | null {
+    if (!item) return null;
+    if (mode === "ENTRY") {
+      if (item.status === "IN_WAREHOUSE") return "This item has already been entered into the warehouse.";
+      if (item.status === "EXITED") return "This item has already exited and cannot be entered again.";
+    } else {
+      if (item.status === "GENERATED") return "This item has not been entered yet. Switch to Entry mode first.";
+      if (item.status === "EXITED") return "This item has already exited the warehouse.";
+    }
+    return null;
+  }
 
   return (
     <div className="mx-auto max-w-lg space-y-5">
       <div>
         <h1 className="text-2xl font-bold">Scan</h1>
         <p className="text-sm text-slate-500">
-          Scan a QR label or enter its code. The next action is decided by the item&apos;s status.
+          Choose <strong>Entry</strong> or <strong>Exit</strong> mode, then scan a QR label or enter its code.
         </p>
+      </div>
+
+      {/* Mode selector */}
+      <div className="grid grid-cols-2 gap-2 rounded-xl bg-slate-100 p-1">
+        <button
+          type="button"
+          onClick={() => changeMode("ENTRY")}
+          className={`rounded-lg py-2 text-sm font-semibold transition ${
+            mode === "ENTRY" ? "bg-white text-green-700 shadow" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          ⬇️ Entry
+        </button>
+        <button
+          type="button"
+          onClick={() => changeMode("EXIT")}
+          className={`rounded-lg py-2 text-sm font-semibold transition ${
+            mode === "EXIT" ? "bg-white text-blue-700 shadow" : "text-slate-500 hover:text-slate-700"
+          }`}
+        >
+          ⬆️ Exit
+        </button>
       </div>
 
       {toast && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-800">{toast}</p>}
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      {mode === "EXIT" && (
+        <div className="card space-y-2">
+          <label className="label">Destination store</label>
+          <select className="input" value={storeId} onChange={(e) => setStoreId(e.target.value)}>
+            <option value="">— select store —</option>
+            {stores.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-400">Required before an item can be scanned out.</p>
+        </div>
+      )}
 
       <div className="card space-y-3">
         {cameraOn ? (
@@ -127,7 +196,7 @@ export default function ScanPage() {
           </>
         ) : (
           <button className="btn-primary w-full" onClick={() => { setCameraOn(true); setLookup(null); }}>
-            📷 Start camera
+            📷 Start camera ({mode === "ENTRY" ? "Entry" : "Exit"} mode)
           </button>
         )}
 
@@ -166,30 +235,19 @@ export default function ScanPage() {
             )}
           </dl>
 
-          {next === "ENTRY" && (
-            <button className="btn-primary w-full" disabled={busy} onClick={confirmScan}>
-              {busy ? "Working…" : "Confirm ENTRY → add to warehouse"}
-            </button>
-          )}
-
-          {next === "EXIT" && (
-            <div className="space-y-2">
-              <label className="label">Destination store</label>
-              <select className="input" value={storeId} onChange={(e) => setStoreId(e.target.value)}>
-                <option value="">— select store —</option>
-                {stores.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              <button className="btn-primary w-full" disabled={busy || !storeId} onClick={confirmScan}>
-                {busy ? "Working…" : "Confirm EXIT → ship to store"}
+          {modeAllowed ? (
+            mode === "ENTRY" ? (
+              <button className="btn-primary w-full" disabled={busy} onClick={confirmScan}>
+                {busy ? "Working…" : "Confirm ENTRY → add to warehouse"}
               </button>
-            </div>
-          )}
-
-          {next === null && (
+            ) : (
+              <button className="btn-primary w-full" disabled={busy || !storeId} onClick={confirmScan}>
+                {busy ? "Working…" : storeId ? "Confirm EXIT → ship to store" : "Select a store first"}
+              </button>
+            )
+          ) : (
             <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-              This item has already exited. Codes are single-use and cannot re-enter.
+              {blockedReason()}
             </p>
           )}
 

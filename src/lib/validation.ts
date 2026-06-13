@@ -25,6 +25,7 @@ export const labelBatchSchema = z.object({
 });
 
 export const scanSchema = z.object({
+  mode: z.enum(["ENTRY", "EXIT"]),
   storeId: z.string().optional().nullable(),
 });
 
