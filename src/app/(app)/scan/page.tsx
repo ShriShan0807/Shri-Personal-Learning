@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 
 // Scanner uses browser-only camera APIs, so load it client-side only.
@@ -40,7 +40,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function ScanPage() {
   const [mode, setMode] = useState<Mode>("ENTRY");
-  const [cameraOn, setCameraOn] = useState(false);
+  const [cameraOn, setCameraOn] = useState(true);
   const [manual, setManual] = useState("");
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [stores, setStores] = useState<Store[]>([]);
@@ -55,13 +55,17 @@ export default function ScanPage() {
     setStores(s.stores || []);
   }, [stores.length]);
 
+  // Preload stores once so switching to Exit mode is instant.
+  useEffect(() => {
+    loadStores();
+  }, [loadStores]);
+
   function changeMode(next: Mode) {
     setMode(next);
     setError(null);
     setToast(null);
     setLookup(null);
     setManual("");
-    if (next === "EXIT") loadStores();
   }
 
   const lookupCode = useCallback(async (code: string) => {
@@ -75,7 +79,6 @@ export default function ScanPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Lookup failed.");
       setLookup(data);
-      setStoreId("");
     } catch (err) {
       setLookup(null);
       setError(err instanceof Error ? err.message : "Lookup failed.");
